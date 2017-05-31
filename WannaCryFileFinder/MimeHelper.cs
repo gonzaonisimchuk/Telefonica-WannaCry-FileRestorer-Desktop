@@ -1,13 +1,13 @@
-﻿using Microsoft.Win32;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
-
-namespace WannaCryFileFinder
+﻿namespace WannaCryFileFinder
 {
+    using Microsoft.Win32;
+    using System;
+    using System.Collections.Generic;
+    using System.IO;
+    using System.Linq;
+    using System.Runtime.InteropServices;
+    using System.Text.RegularExpressions;
+
     public static class MimeHelper
     {
         private const string UNKNOWN_EXTENSION = ".txt";
@@ -18,7 +18,7 @@ namespace WannaCryFileFinder
         private static readonly Regex xlsRegex = new Regex("4D6963726F736F667420457863656C00", RegexOptions.Compiled);
         private static readonly Regex pptRegex = new Regex("4D5320506F776572506F696E74", RegexOptions.Compiled);
 
-        private static Dictionary<string, Regex> knownHeaders = new Dictionary<string, Regex>()
+        private static readonly Dictionary<string, Regex> knownHeaders = new Dictionary<string, Regex>()
         {
             { ".7z",new Regex("^377ABCAF271C", RegexOptions.Compiled) },
             { MSOFFICE_EXTENSION,new Regex("^D0CF11E0A1B11AE1", RegexOptions.Compiled) },
@@ -40,25 +40,25 @@ namespace WannaCryFileFinder
         };
 
         [DllImport(@"urlmon.dll", CharSet = CharSet.Auto)]
-        private extern static System.UInt32 FindMimeFromData(
-            System.UInt32 pBC,
-            [MarshalAs(UnmanagedType.LPStr)] System.String pwzUrl,
+        private static extern uint FindMimeFromData(
+            uint pBC,
+            [MarshalAs(UnmanagedType.LPStr)] string pwzUrl,
             [MarshalAs(UnmanagedType.LPArray)] byte[] pBuffer,
-            System.UInt32 cbSize,
-            [MarshalAs(UnmanagedType.LPStr)] System.String pwzMimeProposed,
-            System.UInt32 dwMimeFlags,
-            out System.UInt32 ppwzMimeOut,
-            System.UInt32 dwReserverd
+            uint cbSize,
+            [MarshalAs(UnmanagedType.LPStr)] string pwzMimeProposed,
+            uint dwMimeFlags,
+            out uint ppwzMimeOut,
+            uint dwReserverd
         );
 
         private static string GetMimeFromFileBinary(byte[] fileBinary)
         {
             try
             {
-                System.UInt32 mimetype;
+                uint mimetype;
                 FindMimeFromData(0, null, fileBinary, (uint)fileBinary.Length, null, 0, out mimetype, 0);
-                System.IntPtr mimeTypePtr = new IntPtr(mimetype);
-                string mime = Marshal.PtrToStringUni(mimeTypePtr);
+                var mimeTypePtr = new IntPtr(mimetype);
+                var mime = Marshal.PtrToStringUni(mimeTypePtr);
                 Marshal.FreeCoTaskMem(mimeTypePtr);
                 return mime;
             }
@@ -70,24 +70,22 @@ namespace WannaCryFileFinder
 
         public static string GetExtensionByContent(string filePath)
         {
-            using (FileStream file = File.OpenRead(filePath))
+            using (var file = File.OpenRead(filePath))
             {
-                byte[] fileHeader = new byte[256];
-                int readedBytes = file.Read(fileHeader, 0, 256);
+                var fileHeader = new byte[256];
+                var readedBytes = file.Read(fileHeader, 0, 256);
                 if (readedBytes > 0)
                 {
                     Array.Resize(ref fileHeader, readedBytes);
-                    string mimeType = GetMimeFromFileBinary(fileHeader).ToLowerInvariant();
+                    var mimeType = GetMimeFromFileBinary(fileHeader).ToLowerInvariant();
                     switch (mimeType)
                     {
                         case "application/x-zip-compressed":
                             return GetExtensionFromZip(file);
                         case "application/octet-stream":
-                            string ext = GetExtensionByKnownHeader(fileHeader);
+                            var ext = GetExtensionByKnownHeader(fileHeader);
                             if (ext.Equals(MSOFFICE_EXTENSION))
-                            {
                                 ext = GetExtensionFromMSOffice(file);
-                            }
                             return ext;
                         default:
                             return GetExtensionByMime(mimeType);
@@ -102,9 +100,9 @@ namespace WannaCryFileFinder
 
         private static string GetExtensionByMime(string mimeType)
         {
-            RegistryKey key = Registry.ClassesRoot.OpenSubKey(@"MIME\Database\Content Type\" + mimeType, false);
-            object value = key != null ? key.GetValue("Extension", null) : null;
-            string result = value != null ? value.ToString() : UNKNOWN_EXTENSION;
+            var key = Registry.ClassesRoot.OpenSubKey(@"MIME\Database\Content Type\" + mimeType, false);
+            var value = key?.GetValue("Extension", null);
+            var result = value?.ToString() ?? UNKNOWN_EXTENSION;
             return result;
         }
 
@@ -123,58 +121,36 @@ namespace WannaCryFileFinder
         private static string GetExtensionFromMSOffice(FileStream file)
         {
             // string content = BitConverter.ToString(ReadAllBytes(file)).Replace("-", "");
-            string content = String.Empty;
-            using (MemoryStream ms = new MemoryStream())
+            var content = string.Empty;
+            using (var ms = new MemoryStream())
             {
                 file.CopyTo(ms);
                 content = BitConverter.ToString(ms.ToArray()).Replace("-", "");
             }
             if (docRegex.IsMatch(content))
-            {
                 return ".doc";
-            }
             if (xlsRegex.IsMatch(content))
-            {
                 return ".xls";
-            }
-            else if (pptRegex.IsMatch(content))
-            {
+            if (pptRegex.IsMatch(content))
                 return ".ppt";
-            }
-            else
-            {
-                return MSOFFICE_EXTENSION;
-            }
+            return MSOFFICE_EXTENSION;
         }
 
-        private static string GetExtensionFromZip(FileStream file)
+        private static string GetExtensionFromZip(Stream file)
         {
-            using (System.IO.Compression.ZipArchive zip = new System.IO.Compression.ZipArchive(file))
+            using (var zip = new System.IO.Compression.ZipArchive(file))
             {
                 if (zip.Entries.Any(p => p.FullName.StartsWith("word/", StringComparison.OrdinalIgnoreCase)))
-                {
                     return ".docx";
-                }
-                else if (zip.Entries.Any(p => p.FullName.StartsWith("xl/", StringComparison.OrdinalIgnoreCase)))
-                {
+                if (zip.Entries.Any(p => p.FullName.StartsWith("xl/", StringComparison.OrdinalIgnoreCase)))
                     return ".xlsx";
-                }
-                else if (zip.Entries.Any(p => p.FullName.StartsWith("ppt/", StringComparison.OrdinalIgnoreCase)))
-                {
+                if (zip.Entries.Any(p => p.FullName.StartsWith("ppt/", StringComparison.OrdinalIgnoreCase)))
                     return ".pptx";
-                }
-                else if (zip.Entries.Any(p => p.FullName.EndsWith("content.opf", StringComparison.OrdinalIgnoreCase)))
-                {
+                if (zip.Entries.Any(p => p.FullName.EndsWith("content.opf", StringComparison.OrdinalIgnoreCase)))
                     return ".epub";
-                }
-                else if (zip.Entries.Any(p => p.FullName.StartsWith("META-INF/", StringComparison.OrdinalIgnoreCase)))
-                {
+                if (zip.Entries.Any(p => p.FullName.StartsWith("META-INF/", StringComparison.OrdinalIgnoreCase)))
                     return ".jar";
-                }
-                else
-                {
-                    return ".zip";
-                }
+                return ".zip";
             }
         }
     }
